@@ -6,7 +6,3 @@ output "service1_dns" {
 output "service2_dns" {
   value = aws_vpclattice_service.service2.dns_entry[0].domain_name
 }
-
-output "client_ssh_command" {
-  value = "ssh -i your-key.pem ec2-user@${aws_instance.client.public_ip}"
-}

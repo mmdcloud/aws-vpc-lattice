@@ -1,113 +1,721 @@
-# Create two demo VPCs
-resource "aws_vpc" "vpc1" {
-  cidr_block           = "10.1.0.0/16"
-  enable_dns_support   = true
-  enable_dns_hostnames = true
+# -----------------------------------------------------------------------------------------
+# VPC Configuration
+# -----------------------------------------------------------------------------------------
+module "vpc1" {
+  source                  = "./modules/vpc"
+  vpc_name                = "vpc1"
+  vpc_cidr                = "10.1.0.0/16"
+  azs                     = var.azs
+  public_subnets          = var.vpc1_public_subnets
+  private_subnets         = var.vpc1_private_subnets
+  enable_dns_hostnames    = true
+  enable_dns_support      = true
+  create_igw              = true
+  map_public_ip_on_launch = true
+  enable_nat_gateway      = true
+  single_nat_gateway      = false
+  one_nat_gateway_per_az  = true
   tags = {
-    Name = "Lattice-Demo-VPC1"
+    Name = "vpc1"
   }
 }
 
-resource "aws_vpc" "vpc2" {
-  cidr_block           = "10.2.0.0/16"
-  enable_dns_support   = true
-  enable_dns_hostnames = true
+module "vpc2" {
+  source                  = "./modules/vpc"
+  vpc_name                = "vpc2"
+  vpc_cidr                = "10.2.0.0/16"
+  azs                     = var.azs
+  public_subnets          = var.vpc2_public_subnets
+  private_subnets         = var.vpc2_private_subnets
+  enable_dns_hostnames    = true
+  enable_dns_support      = true
+  create_igw              = true
+  map_public_ip_on_launch = true
+  enable_nat_gateway      = true
+  single_nat_gateway      = false
+  one_nat_gateway_per_az  = true
   tags = {
-    Name = "Lattice-Demo-VPC2"
+    Name = "vpc2"
   }
 }
 
-# Create subnets in each VPC
-resource "aws_subnet" "vpc1_private" {
-  vpc_id            = aws_vpc.vpc1.id
-  cidr_block        = "10.1.1.0/24"
-  availability_zone = "us-east-1a"
+module "vpc3" {
+  source                  = "./modules/vpc"
+  vpc_name                = "vpc3"
+  vpc_cidr                = "10.3.0.0/16"
+  azs                     = var.azs
+  public_subnets          = var.vpc3_public_subnets
+  private_subnets         = var.vpc3_private_subnets
+  enable_dns_hostnames    = true
+  enable_dns_support      = true
+  create_igw              = true
+  map_public_ip_on_launch = true
+  enable_nat_gateway      = true
+  single_nat_gateway      = false
+  one_nat_gateway_per_az  = true
   tags = {
-    Name = "VPC1-Private"
+    Name = "vpc3"
   }
 }
 
-resource "aws_subnet" "vpc2_private" {
-  vpc_id            = aws_vpc.vpc2.id
-  cidr_block        = "10.2.1.0/24"
-  availability_zone = "us-east-1b"
+module "lattice_sg" {
+  source = "./modules/security-groups"
+  name   = "lattice-sg"
+  vpc_id = module.vpc1.vpc_id
+  ingress_rules = [
+    {
+      description     = "HTTP Traffic"
+      from_port       = 80
+      to_port         = 80
+      protocol        = "tcp"
+      security_groups = []
+      cidr_blocks     = ["0.0.0.0/0"]
+    },
+    {
+      description     = "All Traffic"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "tcp"
+      security_groups = []
+      cidr_blocks     = ["0.0.0.0/0"]
+    }
+  ]
+  egress_rules = [
+    {
+      description     = "Allow outbound traffic to al"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+    }
+  ]
   tags = {
-    Name = "VPC2-Private"
+    Name = "lattice-sg"
   }
 }
 
-# Create security groups
-resource "aws_security_group" "lattice_sg" {
-  name        = "lattice-service-sg"
-  description = "Allow traffic for VPC Lattice"
-  vpc_id      = aws_vpc.vpc1.id
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# Create VPC Lattice Service Network
-resource "aws_vpclattice_service_network" "demo_network" {
-  name      = "demo-lattice-network"
-  auth_type = "AWS_IAM"
+module "ecs_lb_sg" {
+  source = "./modules/security-groups"
+  name   = "ecs-lb-sg"
+  vpc_id = module.vpc1.vpc_id
+  ingress_rules = [
+    {
+      description     = "HTTP Traffic"
+      from_port       = 80
+      to_port         = 80
+      protocol        = "tcp"
+      security_groups = []
+      cidr_blocks     = ["0.0.0.0/0"]
+    }
+  ]
+  egress_rules = [
+    {
+      description     = "Allow outbound traffic to al"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+    }
+  ]
   tags = {
-    Environment = "Demo"
+    Name = "ecs-lb-sg"
   }
 }
 
-# Associate VPCs to the service network
-resource "aws_vpclattice_service_network_vpc_association" "vpc1_assoc" {
-  service_network_identifier = aws_vpclattice_service_network.demo_network.id
-  vpc_identifier             = aws_vpc.vpc1.id
-  security_group_ids         = [aws_security_group.lattice_sg.id]
-}
-
-resource "aws_vpclattice_service_network_vpc_association" "vpc2_assoc" {
-  service_network_identifier = aws_vpclattice_service_network.demo_network.id
-  vpc_identifier             = aws_vpc.vpc2.id
-  security_group_ids         = [aws_security_group.lattice_sg.id]
-}
-
-# Create target groups for services
-resource "aws_vpclattice_target_group" "service1_tg" {
-  name = "service1-target-group"
-  type = "INSTANCE"
-
-  config {
-    port           = 8080
-    protocol       = "HTTP"
-    vpc_identifier = aws_vpc.vpc1.id
+module "ecs_sg" {
+  source = "./modules/security-groups"
+  name   = "ecs-sg"
+  vpc_id = module.vpc1.vpc_id
+  ingress_rules = [
+    {
+      description     = "ECS Traffic"
+      from_port       = 8080
+      to_port         = 8080
+      protocol        = "tcp"
+      security_groups = [module.ecs_lb_sg.id]
+      cidr_blocks     = []
+    }
+  ]
+  egress_rules = [
+    {
+      description     = "Allow outbound traffic to al"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+    }
+  ]
+  tags = {
+    Name = "ecs-sg"
   }
 }
 
-resource "aws_vpclattice_target_group" "service2_tg" {
-  name = "service2-target-group"
-  type = "INSTANCE"
-
-  config {
-    port           = 8080
-    protocol       = "HTTP"
-    vpc_identifier = aws_vpc.vpc2.id
+module "lambda_sg" {
+  source = "./modules/security-groups"
+  name   = "lambda-sg"
+  vpc_id = module.vpc2.vpc_id
+  ingress_rules = []
+  egress_rules = [
+    {
+      description     = "Allow outbound traffic to al"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+    }
+  ]
+  tags = {
+    Name = "lambda-sg"
   }
 }
 
-# Register demo EC2 instances as targets
+module "ec2_lb_sg" {
+  source = "./modules/security-groups"
+  name   = "ec2-lb-sg"
+  vpc_id = module.vpc3.vpc_id
+  ingress_rules = [
+    {
+      description     = "HTTP Traffic"
+      from_port       = 80
+      to_port         = 80
+      protocol        = "tcp"
+      security_groups = []
+      cidr_blocks     = ["0.0.0.0/0"]
+    }
+  ]
+  egress_rules = [
+    {
+      description     = "Allow outbound traffic to al"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+    }
+  ]
+  tags = {
+    Name = "ec2-lb-sg"
+  }
+}
+
+module "ec2_asg_sg" {
+  source = "./modules/security-groups"
+  name   = "ec2-asg-sg"
+  vpc_id = module.vpc3.vpc_id
+  ingress_rules = [
+    {
+      description     = "HTTP Traffic"
+      from_port       = 8080
+      to_port         = 8080
+      protocol        = "tcp"
+      security_groups = [module.ec2_lb_sg.id]
+      cidr_blocks     = []
+    }
+  ]
+  egress_rules = [
+    {
+      description     = "Allow outbound traffic to al"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+    }
+  ]
+  tags = {
+    Name = "ec2-asg-sg"
+  }
+}
+
+# -----------------------------------------------------------------------------------------
+# ECS Configuration
+# -----------------------------------------------------------------------------------------
+module "container_registry" {
+  source               = "./modules/ecr"
+  force_delete         = true
+  scan_on_push         = false
+  image_tag_mutability = "IMMUTABLE"
+  bash_command         = "bash ${path.cwd}/../src/ecr-build-push.sh nodeapp ${var.region}"
+  name                 = "nodeapp-registry"
+  lifecycle_policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep last 10 images"
+        selection = {
+          tagStatus     = "tagged"
+          tagPrefixList = ["v"]
+          countType     = "imageCountMoreThan"
+          countNumber   = 10
+        }
+        action = {
+          type = "expire"
+        }
+      },
+      {
+        rulePriority = 2
+        description  = "Delete untagged images older than 7 days"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 7
+        }
+        action = {
+          type = "expire"
+        }
+      }
+    ]
+  })
+}
+
+module "ecs_task_execution_role" {
+  source             = "./modules/iam"
+  role_name          = "ecs-task-execution-role"
+  role_description   = "IAM role for ECS task execution"
+  policy_name        = "ecs-task-execution-policy"
+  policy_description = "IAM policy for ECS task execution"
+  assume_role_policy = <<EOF
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Action": "sts:AssumeRole",
+                "Principal": {
+                  "Service": "ecs-tasks.amazonaws.com"
+                },
+                "Effect": "Allow",
+                "Sid": ""
+            }
+        ]
+    }
+    EOF
+  policy             = <<EOF
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Action": [
+                  "s3:PutObject"
+                ],
+                "Resource": "*",
+                "Effect": "Allow"
+            }
+        ]
+    }
+    EOF
+}
+
+module "ecs_lb_logs_bucket" {
+  source        = "./modules/s3"
+  bucket_name   = "ecs-lb-logs-bucket"
+  objects       = []
+  bucket_policy = ""
+  cors = [
+    {
+      allowed_headers = ["*"]
+      allowed_methods = ["GET"]
+      allowed_origins = ["*"]
+      max_age_seconds = 3000
+    },
+    {
+      allowed_headers = ["*"]
+      allowed_methods = ["PUT"]
+      allowed_origins = ["*"]
+      max_age_seconds = 3000
+    }
+  ]
+  versioning_enabled = "Enabled"
+  force_destroy      = true
+}
+
+module "nodeapp_ecs_log_group" {
+  source            = "./modules/cloudwatch/cloudwatch-log-group"
+  log_group_name    = "/aws/ecs/nodeapp-ecs-log-group"
+  skip_destroy      = false
+  retention_in_days = 90
+}
+
+module "ecs_lb" {
+  source                     = "terraform-aws-modules/alb/aws"
+  name                       = "ecs-lb"
+  load_balancer_type         = "application"
+  vpc_id                     = module.vpc1.vpc_id
+  subnets                    = module.vpc1.public_subnets
+  enable_deletion_protection = false
+  drop_invalid_header_fields = true
+  ip_address_type            = "ipv4"
+  internal                   = false
+  security_groups = [
+    module.ecs_lb_sg.id
+  ]
+  access_logs = {
+    bucket = "${module.ecs_lb_logs_bucket.bucket}"
+  }
+  listeners = {
+    ecs_lb_http_listener = {
+      port     = 80
+      protocol = "HTTP"
+      forward = {
+        target_group_key = "ecs_target_group"
+      }
+    }
+  }
+  target_groups = {
+    ecs_target_group = {
+      backend_protocol = "HTTP"
+      backend_port     = 8080
+      target_type      = "ip"
+      vpc_id           = module.vpc1.vpc_id
+      health_check = {
+        enabled             = true
+        healthy_threshold   = 3
+        interval            = 30
+        path                = "/"
+        port                = 8080
+        protocol            = "HTTP"
+        unhealthy_threshold = 3
+      }
+      create_attachment = false
+    }
+  }
+}
+
+module "ecs_cluster" {
+  source       = "terraform-aws-modules/ecs/aws"
+  cluster_name = "ecs-cluster"
+  services = {
+    nodeapp_ecs = {
+      cpu                    = 2048
+      memory                 = 4096
+      task_exec_iam_role_arn = module.ecs_task_execution_role.arn
+      iam_role_arn           = module.ecs_task_execution_role.arn
+      desired_count          = 2
+      assign_public_ip       = false
+      deployment_controller = {
+        type = "ECS"
+      }
+      network_mode = "awsvpc"
+      runtime_platform = {
+        cpu_architecture        = "X86_64"
+        operating_system_family = "LINUX"
+      }
+      launch_type              = "FARGATE"
+      scheduling_strategy      = "REPLICA"
+      requires_compatibilities = ["FARGATE"]
+      container_definitions = {
+        nodeapp_ecs = {
+          cpu       = 1024
+          memory    = 2048
+          essential = true
+          image     = "${module.container_registry.repository_url}:latest"
+          ulimits = [
+            {
+              name      = "nofile"
+              softLimit = 65536
+              hardLimit = 65536
+            }
+          ]
+          portMappings = [
+            {
+              name          = "nodeapp_ecs"
+              containerPort = 8080
+              hostPort      = 8080
+              protocol      = "tcp"
+            }
+          ]
+          environment            = []
+          readonlyRootFilesystem = false
+          logConfiguration = {
+            logConfiguration = {
+              logDriver = "awslogs"
+              options = {
+                awslogs-group         = module.nodeapp_ecs_log_group.name
+                awslogs-region        = var.region
+                awslogs-stream-prefix = "nodeapp-ecs"
+              }
+            }
+          }
+          memoryReservation = 100
+          restartPolicy = {
+            enabled              = true
+            ignoredExitCodes     = [1]
+            restartAttemptPeriod = 60
+          }
+        }
+      }
+      load_balancer = {
+        service = {
+          target_group_arn = module.ecs_lb.target_groups["ecs_target_group"].arn
+          container_name   = "nodeapp_ecs"
+          container_port   = 8080
+        }
+      }
+      subnet_ids                    = module.vpc1.private_subnets
+      vpc_id                        = module.vpc1.vpc_id
+      security_group_ids            = [module.ecs_sg.id]
+      availability_zone_rebalancing = "ENABLED"
+    }
+  }
+}
+
+# -----------------------------------------------------------------------------------------
+# Lambda Configuration
+# -----------------------------------------------------------------------------------------
+module "lambda_function_code" {
+  source      = "./modules/s3"
+  bucket_name = "lambda-function-code"
+  objects = [
+    {
+      key    = "lambda.zip"
+      source = "./files/lambda.zip"
+    }
+  ]
+  bucket_policy = ""
+  cors = [
+    {
+      allowed_headers = ["*"]
+      allowed_methods = ["GET"]
+      allowed_origins = ["*"]
+      max_age_seconds = 3000
+    }
+  ]
+  versioning_enabled = "Enabled"
+  force_destroy      = true
+}
+
+module "lambda_function_iam_role" {
+  source             = "./modules/iam"
+  role_name          = "lambda-function-iam-role"
+  role_description   = "IAM role for lambda function"
+  policy_name        = "lambda-function-iam-policy"
+  policy_description = "IAM policy lambda function"
+  assume_role_policy = <<EOF
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Action": "sts:AssumeRole",
+                "Principal": {
+                  "Service": "lambda.amazonaws.com"
+                },
+                "Effect": "Allow",
+                "Sid": ""
+            }
+        ]
+    }
+    EOF
+  policy             = <<EOF
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Action": [
+                  "logs:CreateLogGroup",
+                  "logs:CreateLogStream",
+                  "logs:PutLogEvents"
+                ],
+                "Resource": "arn:aws:logs:*:*:*",
+                "Effect": "Allow"
+            },
+            {
+              "Action": [
+                "ec2:CreateNetworkInterface",
+                "ec2:DescribeNetworkInterfaces",
+                "ec2:DeleteNetworkInterface"
+              ],
+              "Effect"   : "Allow",
+              "Resource" : "*"
+            }
+        ]
+    }
+    EOF
+}
+
+module "lambda_function" {
+  source        = "./modules/lambda"
+  function_name = "lambda-function"
+  role_arn      = module.lambda_function_iam_role.arn
+  permissions   = []
+  vpc_config = {
+    security_group_ids = [module.lambda_sg.id]
+    subnet_ids         = module.vpc2.private_subnets
+  }
+  env_variables           = {}
+  handler                 = "lambda.lambda_handler"
+  runtime                 = "python3.12"
+  s3_bucket               = module.lambda_function_code.bucket
+  s3_key                  = "lambda.zip"
+  layers                  = []
+  code_signing_config_arn = null
+  tags = {
+    Name = "lambda-function"
+  }
+}
+
+# -----------------------------------------------------------------------------------------
+# EC2 Configuration
+# -----------------------------------------------------------------------------------------
+module "ec2_lb_logs_bucket" {
+  source        = "./modules/s3"
+  bucket_name   = "ec2-lb-logs-bucket"
+  objects       = []
+  bucket_policy = ""
+  cors = [
+    {
+      allowed_headers = ["*"]
+      allowed_methods = ["GET"]
+      allowed_origins = ["*"]
+      max_age_seconds = 3000
+    },
+    {
+      allowed_headers = ["*"]
+      allowed_methods = ["PUT"]
+      allowed_origins = ["*"]
+      max_age_seconds = 3000
+    }
+  ]
+  versioning_enabled = "Enabled"
+  force_destroy      = true
+}
+
+module "nodeapp_ec2_log_group" {
+  source            = "./modules/cloudwatch/cloudwatch-log-group"
+  log_group_name    = "/aws/ecs/nodeapp-ec2-log-group"
+  skip_destroy      = false
+  retention_in_days = 90
+}
+
+module "ec2_lb" {
+  source                     = "terraform-aws-modules/alb/aws"
+  name                       = "ec2-lb"
+  load_balancer_type         = "application"
+  vpc_id                     = module.vpc3.vpc_id
+  subnets                    = module.vpc3.public_subnets
+  enable_deletion_protection = false
+  drop_invalid_header_fields = true
+  ip_address_type            = "ipv4"
+  internal                   = false
+  security_groups = [
+    module.ec2_lb_sg.id
+  ]
+  access_logs = {
+    bucket = "${module.ec2_lb_logs_bucket.bucket}"
+  }
+  listeners = {
+    ec2_lb_http_listener = {
+      port     = 80
+      protocol = "HTTP"
+      forward = {
+        target_group_key = "ec2_target_group"
+      }
+    }
+  }
+  target_groups = {
+    ec2_target_group = {
+      backend_protocol = "HTTP"
+      backend_port     = 8080
+      target_type      = "ip"
+      vpc_id           = module.vpc3.vpc_id
+      health_check = {
+        enabled             = true
+        healthy_threshold   = 3
+        interval            = 30
+        path                = "/"
+        port                = 8080
+        protocol            = "HTTP"
+        unhealthy_threshold = 3
+      }
+      create_attachment = false
+    }
+  }
+}
+
+module "iam_instance_profile_role" {
+  source             = "./modules/iam"
+  role_name          = "iam-instance-profile-role"
+  role_description   = "Instance Profile Role for EC2 Instances"
+  policy_name        = "iam-instance-profile-policy"
+  policy_description = "IAM policy for EC2 instance profile"
+  assume_role_policy = <<EOF
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Action": "sts:AssumeRole",
+                "Principal": {
+                  "Service": "ec2.amazonaws.com"
+                },
+                "Effect": "Allow",
+                "Sid": ""
+            }
+        ]
+    }
+    EOF
+  policy             = <<EOF
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Action": [
+                  "s3:*"
+                ],
+                "Resource": "*",
+                "Effect": "Allow"
+            }
+        ]
+    }
+    EOF
+}
+
+resource "aws_iam_instance_profile" "iam_instance_profile" {
+  name = "iam-instance-profile"
+  role = module.iam_instance_profile_role.name
+}
+
+module "launch_template" {
+  source                               = "./modules/launch_template"
+  name                                 = "launch-template"
+  description                          = "launch-template"
+  ebs_optimized                        = false
+  image_id                             = "ami-005fc0f236362e99f"
+  instance_type                        = "t2.micro"
+  instance_initiated_shutdown_behavior = "stop"
+  instance_profile_name                = aws_iam_instance_profile.iam_instance_profile.name
+  key_name                             = "madmaxkeypair"
+  network_interfaces = [
+    {
+      associate_public_ip_address = true
+      security_groups             = [module.ec2_asg_sg.id]
+    }
+  ]
+  user_data = base64encode(templatefile("${path.module}/../scripts/user_data.sh", {}))
+}
+
+module "asg" {
+  source                    = "./modules/auto_scaling_group"
+  name                      = "asg"
+  min_size                  = 3
+  max_size                  = 50
+  desired_capacity          = 3
+  health_check_grace_period = 300
+  health_check_type         = "ELB"
+  force_delete              = true
+  target_group_arns         = [module.ec2_lb.target_groups[0].arn]
+  vpc_zone_identifier       = module.vpc3.private_subnets
+  launch_template_id        = module.launch_template.id
+  launch_template_version   = "$Latest"
+}
+
 resource "aws_instance" "service1" {
-  ami                    = "ami-0c55b159cbfafe1f0" # Amazon Linux 2
+  ami                    = "ami-0c55b159cbfafe1f0"
   instance_type          = "t3.micro"
-  subnet_id              = aws_subnet.vpc1_private.id
-  vpc_security_group_ids = [aws_security_group.lattice_sg.id]
+  subnet_id              = module.vpc3.vpc_id
+  vpc_security_group_ids = [module.lattice_sg.id]
   user_data              = <<-EOF
               #!/bin/bash
               yum install -y docker
@@ -119,19 +727,60 @@ resource "aws_instance" "service1" {
   }
 }
 
-resource "aws_instance" "service2" {
-  ami                    = "ami-0c55b159cbfafe1f0" # Amazon Linux 2
-  instance_type          = "t3.micro"
-  subnet_id              = aws_subnet.vpc2_private.id
-  vpc_security_group_ids = [aws_security_group.lattice_sg.id]
-  user_data              = <<-EOF
-              #!/bin/bash
-              yum install -y docker
-              systemctl start docker
-              docker run -d -p 8080:80 httpd
-              EOF
+
+# Create VPC Lattice Service Network
+resource "aws_vpclattice_service_network" "lattice_network" {
+  name      = "lattice-network"
+  auth_type = "AWS_IAM"
   tags = {
-    Name = "Service2"
+    Name = "lattice-network"
+  }
+}
+
+# Associate VPCs to the service network
+resource "aws_vpclattice_service_network_vpc_association" "vpc1_assoc" {
+  service_network_identifier = aws_vpclattice_service_network.lattice_network.id
+  vpc_identifier             = module.vpc1.vpc_id
+  security_group_ids         = [module.lattice_sg.id]
+}
+
+resource "aws_vpclattice_service_network_vpc_association" "vpc2_assoc" {
+  service_network_identifier = aws_vpclattice_service_network.lattice_network.id
+  vpc_identifier             = module.vpc2.vpc_id
+  security_group_ids         = [module.lattice_sg.id]
+}
+
+resource "aws_vpclattice_service_network_vpc_association" "vpc3_assoc" {
+  service_network_identifier = aws_vpclattice_service_network.lattice_network.id
+  vpc_identifier             = module.vpc3.vpc_id
+  security_group_ids         = [module.lattice_sg.id]
+}
+
+# Create target groups for services
+resource "aws_vpclattice_target_group" "service1_tg" {
+  name = "service1-target-group"
+  type = "INSTANCE"
+
+  config {
+    port           = 8080
+    protocol       = "HTTP"
+    vpc_identifier = module.vpc1.vpc_id
+  }
+}
+
+resource "aws_vpclattice_target_group" "service2_tg" {
+  name = "service2-target-group"
+  type = "LAMBDA"
+}
+
+resource "aws_vpclattice_target_group" "service3_tg" {
+  name = "service3-target-group"
+  type = "INSTANCE"
+
+  config {
+    port           = 8080
+    protocol       = "HTTP"
+    vpc_identifier = module.vpc3.vpc_id
   }
 }
 
@@ -146,7 +795,14 @@ resource "aws_vpclattice_target_group_attachment" "service1_attach" {
 resource "aws_vpclattice_target_group_attachment" "service2_attach" {
   target_group_identifier = aws_vpclattice_target_group.service2_tg.id
   target {
-    id   = aws_instance.service2.id
+    id = module.lambda_function.id
+  }
+}
+
+resource "aws_vpclattice_target_group_attachment" "service3_attach" {
+  target_group_identifier = aws_vpclattice_target_group.service3_tg.id
+  target {
+    id   = aws_instance.service1.id
     port = 8080
   }
 }
@@ -173,6 +829,7 @@ resource "aws_vpclattice_listener" "service1_listener" {
     }
   }
 }
+
 resource "aws_vpclattice_service" "service2" {
   name            = "service2"
   auth_type       = "AWS_IAM"
@@ -195,24 +852,51 @@ resource "aws_vpclattice_listener" "service2_listener" {
   }
 }
 
+resource "aws_vpclattice_service" "service3" {
+  name            = "service3"
+  auth_type       = "AWS_IAM"
+  certificate_arn = null # For demo purposes
+}
+
+resource "aws_vpclattice_listener" "service3_listener" {
+  service_identifier = aws_vpclattice_service.service2.id
+  name               = "http-listener"
+  port               = 80
+  protocol           = "HTTP"
+
+  default_action {
+    forward {
+      target_groups {
+        target_group_identifier = aws_vpclattice_target_group.service3_tg.id
+        weight                  = 100
+      }
+    }
+  }
+}
+
 # Associate services to the service network
 resource "aws_vpclattice_service_network_service_association" "service1_assoc" {
   service_identifier         = aws_vpclattice_service.service1.id
-  service_network_identifier = aws_vpclattice_service_network.demo_network.id
+  service_network_identifier = aws_vpclattice_service_network.lattice_network.id
 }
 
 resource "aws_vpclattice_service_network_service_association" "service2_assoc" {
   service_identifier         = aws_vpclattice_service.service2.id
-  service_network_identifier = aws_vpclattice_service_network.demo_network.id
+  service_network_identifier = aws_vpclattice_service_network.lattice_network.id
+}
+
+resource "aws_vpclattice_service_network_service_association" "service3_assoc" {
+  service_identifier         = aws_vpclattice_service.service3.id
+  service_network_identifier = aws_vpclattice_service_network.lattice_network.id
 }
 
 # Create a test client instance
-resource "aws_instance" "client" {
-  ami                    = "ami-0c55b159cbfafe1f0"
-  instance_type          = "t3.micro"
-  subnet_id              = aws_subnet.vpc1_private.id
-  vpc_security_group_ids = [aws_security_group.lattice_sg.id]
-  tags = {
-    Name = "TestClient"
-  }
-}
+# resource "aws_instance" "client" {
+#   ami                    = "ami-0c55b159cbfafe1f0"
+#   instance_type          = "t3.micro"
+#   subnet_id              = module.vpc1_private.id
+#   vpc_security_group_ids = [aws_security_group.lattice_sg.id]
+#   tags = {
+#     Name = "TestClient"
+#   }
+# }
