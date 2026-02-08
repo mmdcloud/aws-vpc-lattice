@@ -30,12 +30,12 @@ variable "vpc_config" {
     security_group_ids = set(string)
     subnet_ids         = set(string)
   })
+  default = null  # ADD THIS
 }
+
 variable "dead_letter_config" {
   type = object({
     target_arn = string
   })
-  default = {
-    target_arn = null
-  }
+  default = null  # ADD THIS
 }

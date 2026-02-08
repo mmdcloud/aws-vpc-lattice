@@ -1,3 +1,7 @@
+resource "random_id" "id" {
+  byte_length = 8
+}
+
 # -----------------------------------------------------------------------------------------
 # VPC Configuration
 # -----------------------------------------------------------------------------------------
@@ -154,9 +158,9 @@ module "ecs_sg" {
 }
 
 module "lambda_sg" {
-  source = "./modules/security-groups"
-  name   = "lambda-sg"
-  vpc_id = module.vpc2.vpc_id
+  source        = "./modules/security-groups"
+  name          = "lambda-sg"
+  vpc_id        = module.vpc2.vpc_id
   ingress_rules = []
   egress_rules = [
     {
@@ -468,7 +472,7 @@ module "ecs_cluster" {
 # -----------------------------------------------------------------------------------------
 module "lambda_function_code" {
   source      = "./modules/s3"
-  bucket_name = "lambda-function-code"
+  bucket_name = "lambda-function-code-${random_id.id.hex}"
   objects = [
     {
       key    = "lambda.zip"
@@ -693,7 +697,7 @@ module "launch_template" {
       security_groups             = [module.ec2_asg_sg.id]
     }
   ]
-  user_data = base64encode(templatefile("${path.module}/../scripts/user_data.sh", {}))
+  user_data = base64encode(templatefile("${path.module}/scripts/user_data.sh", {}))
 }
 
 module "asg" {
@@ -705,27 +709,27 @@ module "asg" {
   health_check_grace_period = 300
   health_check_type         = "ELB"
   force_delete              = true
-  target_group_arns         = [module.ec2_lb.target_groups[0].arn]
+  target_group_arns         = [module.ec2_lb.target_groups["ec2_target_group"].arn]
   vpc_zone_identifier       = module.vpc3.private_subnets
   launch_template_id        = module.launch_template.id
   launch_template_version   = "$Latest"
 }
 
-resource "aws_instance" "service1" {
-  ami                    = "ami-0c55b159cbfafe1f0"
-  instance_type          = "t3.micro"
-  subnet_id              = module.vpc3.vpc_id
-  vpc_security_group_ids = [module.lattice_sg.id]
-  user_data              = <<-EOF
-              #!/bin/bash
-              yum install -y docker
-              systemctl start docker
-              docker run -d -p 8080:80 nginx
-              EOF
-  tags = {
-    Name = "Service1"
-  }
-}
+# resource "aws_instance" "service1" {
+#   ami                    = "ami-0c55b159cbfafe1f0"
+#   instance_type          = "t3.micro"
+#   subnet_id              = module.vpc3.vpc_id
+#   vpc_security_group_ids = [module.lattice_sg.id]
+#   user_data              = <<-EOF
+#               #!/bin/bash
+#               yum install -y docker
+#               systemctl start docker
+#               docker run -d -p 8080:80 nginx
+#               EOF
+#   tags = {
+#     Name = "Service1"
+#   }
+# }
 
 
 # Create VPC Lattice Service Network
@@ -759,10 +763,10 @@ resource "aws_vpclattice_service_network_vpc_association" "vpc3_assoc" {
 # Create target groups for services
 resource "aws_vpclattice_target_group" "service1_tg" {
   name = "service1-target-group"
-  type = "INSTANCE"
+  type = "ALB"
 
   config {
-    port           = 8080
+    port           = 80
     protocol       = "HTTP"
     vpc_identifier = module.vpc1.vpc_id
   }
@@ -775,10 +779,10 @@ resource "aws_vpclattice_target_group" "service2_tg" {
 
 resource "aws_vpclattice_target_group" "service3_tg" {
   name = "service3-target-group"
-  type = "INSTANCE"
+  type = "ALB"
 
   config {
-    port           = 8080
+    port           = 80
     protocol       = "HTTP"
     vpc_identifier = module.vpc3.vpc_id
   }
@@ -787,8 +791,8 @@ resource "aws_vpclattice_target_group" "service3_tg" {
 resource "aws_vpclattice_target_group_attachment" "service1_attach" {
   target_group_identifier = aws_vpclattice_target_group.service1_tg.id
   target {
-    id   = aws_instance.service1.id
-    port = 8080
+    id   = module.ecs_lb.id
+    port = 80
   }
 }
 
@@ -802,8 +806,8 @@ resource "aws_vpclattice_target_group_attachment" "service2_attach" {
 resource "aws_vpclattice_target_group_attachment" "service3_attach" {
   target_group_identifier = aws_vpclattice_target_group.service3_tg.id
   target {
-    id   = aws_instance.service1.id
-    port = 8080
+    id   = module.ec2_lb.id
+    port = 80
   }
 }
 
@@ -811,7 +815,7 @@ resource "aws_vpclattice_target_group_attachment" "service3_attach" {
 resource "aws_vpclattice_service" "service1" {
   name            = "service1"
   auth_type       = "AWS_IAM"
-  certificate_arn = null # For demo purposes
+  certificate_arn = null
 }
 
 resource "aws_vpclattice_listener" "service1_listener" {
@@ -833,7 +837,7 @@ resource "aws_vpclattice_listener" "service1_listener" {
 resource "aws_vpclattice_service" "service2" {
   name            = "service2"
   auth_type       = "AWS_IAM"
-  certificate_arn = null # For demo purposes
+  certificate_arn = null
 }
 
 resource "aws_vpclattice_listener" "service2_listener" {
@@ -855,11 +859,11 @@ resource "aws_vpclattice_listener" "service2_listener" {
 resource "aws_vpclattice_service" "service3" {
   name            = "service3"
   auth_type       = "AWS_IAM"
-  certificate_arn = null # For demo purposes
+  certificate_arn = null
 }
 
 resource "aws_vpclattice_listener" "service3_listener" {
-  service_identifier = aws_vpclattice_service.service2.id
+  service_identifier = aws_vpclattice_service.service3.id
   name               = "http-listener"
   port               = 80
   protocol           = "HTTP"
@@ -889,14 +893,3 @@ resource "aws_vpclattice_service_network_service_association" "service3_assoc" {
   service_identifier         = aws_vpclattice_service.service3.id
   service_network_identifier = aws_vpclattice_service_network.lattice_network.id
 }
-
-# Create a test client instance
-# resource "aws_instance" "client" {
-#   ami                    = "ami-0c55b159cbfafe1f0"
-#   instance_type          = "t3.micro"
-#   subnet_id              = module.vpc1_private.id
-#   vpc_security_group_ids = [aws_security_group.lattice_sg.id]
-#   tags = {
-#     Name = "TestClient"
-#   }
-# }
