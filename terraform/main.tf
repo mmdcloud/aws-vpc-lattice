@@ -715,181 +715,365 @@ module "asg" {
   launch_template_version   = "$Latest"
 }
 
-# resource "aws_instance" "service1" {
-#   ami                    = "ami-0c55b159cbfafe1f0"
-#   instance_type          = "t3.micro"
-#   subnet_id              = module.vpc3.vpc_id
-#   vpc_security_group_ids = [module.lattice_sg.id]
-#   user_data              = <<-EOF
-#               #!/bin/bash
-#               yum install -y docker
-#               systemctl start docker
-#               docker run -d -p 8080:80 nginx
-#               EOF
+# Create VPC Lattice Service Network
+# resource "aws_vpclattice_service_network" "lattice_network" {
+#   name      = "lattice-network"
+#   auth_type = "AWS_IAM"
 #   tags = {
-#     Name = "Service1"
+#     Name = "lattice-network"
 #   }
 # }
 
+# # Associate VPCs to the service network
+# resource "aws_vpclattice_service_network_vpc_association" "vpc1_assoc" {
+#   service_network_identifier = aws_vpclattice_service_network.lattice_network.id
+#   vpc_identifier             = module.vpc1.vpc_id
+#   security_group_ids         = [module.lattice_sg.id]
+# }
 
-# Create VPC Lattice Service Network
-resource "aws_vpclattice_service_network" "lattice_network" {
+# resource "aws_vpclattice_service_network_vpc_association" "vpc2_assoc" {
+#   service_network_identifier = aws_vpclattice_service_network.lattice_network.id
+#   vpc_identifier             = module.vpc2.vpc_id
+#   security_group_ids         = [module.lattice_sg.id]
+# }
+
+# resource "aws_vpclattice_service_network_vpc_association" "vpc3_assoc" {
+#   service_network_identifier = aws_vpclattice_service_network.lattice_network.id
+#   vpc_identifier             = module.vpc3.vpc_id
+#   security_group_ids         = [module.lattice_sg.id]
+# }
+
+# # Create target groups for services
+# resource "aws_vpclattice_target_group" "service1_tg" {
+#   name = "service1-target-group"
+#   type = "ALB"
+
+#   config {
+#     port           = 80
+#     protocol       = "HTTP"
+#     vpc_identifier = module.vpc1.vpc_id
+#   }
+# }
+
+# resource "aws_vpclattice_target_group" "service2_tg" {
+#   name = "service2-target-group"
+#   type = "LAMBDA"
+# }
+
+# resource "aws_vpclattice_target_group" "service3_tg" {
+#   name = "service3-target-group"
+#   type = "ALB"
+
+#   config {
+#     port           = 80
+#     protocol       = "HTTP"
+#     vpc_identifier = module.vpc3.vpc_id
+#   }
+# }
+
+# resource "aws_vpclattice_target_group_attachment" "service1_attach" {
+#   target_group_identifier = aws_vpclattice_target_group.service1_tg.id
+#   target {
+#     id   = module.ecs_lb.id
+#     port = 80
+#   }
+# }
+
+# resource "aws_vpclattice_target_group_attachment" "service2_attach" {
+#   target_group_identifier = aws_vpclattice_target_group.service2_tg.id
+#   target {
+#     id = module.lambda_function.id
+#   }
+# }
+
+# resource "aws_vpclattice_target_group_attachment" "service3_attach" {
+#   target_group_identifier = aws_vpclattice_target_group.service3_tg.id
+#   target {
+#     id   = module.ec2_lb.id
+#     port = 80
+#   }
+# }
+
+# # Create Lattice Services
+# resource "aws_vpclattice_service" "service1" {
+#   name            = "service1"
+#   auth_type       = "AWS_IAM"
+#   certificate_arn = null
+# }
+
+# resource "aws_vpclattice_listener" "service1_listener" {
+#   service_identifier = aws_vpclattice_service.service1.id
+#   name               = "http-listener"
+#   port               = 80
+#   protocol           = "HTTP"
+
+#   default_action {
+#     forward {
+#       target_groups {
+#         target_group_identifier = aws_vpclattice_target_group.service1_tg.id
+#         weight                  = 100
+#       }
+#     }
+#   }
+# }
+
+# resource "aws_vpclattice_service" "service2" {
+#   name            = "service2"
+#   auth_type       = "AWS_IAM"
+#   certificate_arn = null
+# }
+
+# resource "aws_vpclattice_listener" "service2_listener" {
+#   service_identifier = aws_vpclattice_service.service2.id
+#   name               = "http-listener"
+#   port               = 80
+#   protocol           = "HTTP"
+
+#   default_action {
+#     forward {
+#       target_groups {
+#         target_group_identifier = aws_vpclattice_target_group.service2_tg.id
+#         weight                  = 100
+#       }
+#     }
+#   }
+# }
+
+# resource "aws_vpclattice_service" "service3" {
+#   name            = "service3"
+#   auth_type       = "AWS_IAM"
+#   certificate_arn = null
+# }
+
+# resource "aws_vpclattice_listener" "service3_listener" {
+#   service_identifier = aws_vpclattice_service.service3.id
+#   name               = "http-listener"
+#   port               = 80
+#   protocol           = "HTTP"
+
+#   default_action {
+#     forward {
+#       target_groups {
+#         target_group_identifier = aws_vpclattice_target_group.service3_tg.id
+#         weight                  = 100
+#       }
+#     }
+#   }
+# }
+
+# # Associate services to the service network
+# resource "aws_vpclattice_service_network_service_association" "service1_assoc" {
+#   service_identifier         = aws_vpclattice_service.service1.id
+#   service_network_identifier = aws_vpclattice_service_network.lattice_network.id
+# }
+
+# resource "aws_vpclattice_service_network_service_association" "service2_assoc" {
+#   service_identifier         = aws_vpclattice_service.service2.id
+#   service_network_identifier = aws_vpclattice_service_network.lattice_network.id
+# }
+
+# resource "aws_vpclattice_service_network_service_association" "service3_assoc" {
+#   service_identifier         = aws_vpclattice_service.service3.id
+#   service_network_identifier = aws_vpclattice_service_network.lattice_network.id
+# }
+
+
+# Service Network Module
+module "lattice_service_network" {
+  source = "./modules/service-network"
+
   name      = "lattice-network"
   auth_type = "AWS_IAM"
+
+  vpc_associations = {
+    vpc1 = {
+      vpc_id             = module.vpc1.vpc_id
+      security_group_ids = [module.lattice_sg.id]
+    }
+    vpc2 = {
+      vpc_id             = module.vpc2.vpc_id
+      security_group_ids = [module.lattice_sg.id]
+    }
+    vpc3 = {
+      vpc_id             = module.vpc3.vpc_id
+      security_group_ids = [module.lattice_sg.id]
+    }
+  }
+
   tags = {
-    Name = "lattice-network"
+    Environment = "production"
+    ManagedBy   = "Terraform"
   }
 }
 
-# Associate VPCs to the service network
-resource "aws_vpclattice_service_network_vpc_association" "vpc1_assoc" {
-  service_network_identifier = aws_vpclattice_service_network.lattice_network.id
-  vpc_identifier             = module.vpc1.vpc_id
-  security_group_ids         = [module.lattice_sg.id]
-}
+# Target Group Modules
+module "service1_target_group" {
+  source = "./modules/target-group"
 
-resource "aws_vpclattice_service_network_vpc_association" "vpc2_assoc" {
-  service_network_identifier = aws_vpclattice_service_network.lattice_network.id
-  vpc_identifier             = module.vpc2.vpc_id
-  security_group_ids         = [module.lattice_sg.id]
-}
-
-resource "aws_vpclattice_service_network_vpc_association" "vpc3_assoc" {
-  service_network_identifier = aws_vpclattice_service_network.lattice_network.id
-  vpc_identifier             = module.vpc3.vpc_id
-  security_group_ids         = [module.lattice_sg.id]
-}
-
-# Create target groups for services
-resource "aws_vpclattice_target_group" "service1_tg" {
   name = "service1-target-group"
   type = "ALB"
 
-  config {
+  config = {
     port           = 80
     protocol       = "HTTP"
     vpc_identifier = module.vpc1.vpc_id
   }
+
+  targets = {
+    ecs_lb = {
+      id   = module.ecs_lb.id
+      port = 80
+    }
+  }
+
+  tags = {
+    Service     = "service1"
+    Environment = "production"
+  }
 }
 
-resource "aws_vpclattice_target_group" "service2_tg" {
+module "service2_target_group" {
+  source = "./modules/target-group"
+
   name = "service2-target-group"
   type = "LAMBDA"
+
+  targets = {
+    lambda_function = {
+      id = module.lambda_function.id
+    }
+  }
+
+  tags = {
+    Service     = "service2"
+    Environment = "production"
+  }
 }
 
-resource "aws_vpclattice_target_group" "service3_tg" {
+module "service3_target_group" {
+  source = "./modules/target-group"
+
   name = "service3-target-group"
   type = "ALB"
 
-  config {
+  config = {
     port           = 80
     protocol       = "HTTP"
     vpc_identifier = module.vpc3.vpc_id
   }
-}
 
-resource "aws_vpclattice_target_group_attachment" "service1_attach" {
-  target_group_identifier = aws_vpclattice_target_group.service1_tg.id
-  target {
-    id   = module.ecs_lb.id
-    port = 80
+  targets = {
+    ec2_lb = {
+      id   = module.ec2_lb.id
+      port = 80
+    }
+  }
+
+  tags = {
+    Service     = "service3"
+    Environment = "production"
   }
 }
 
-resource "aws_vpclattice_target_group_attachment" "service2_attach" {
-  target_group_identifier = aws_vpclattice_target_group.service2_tg.id
-  target {
-    id = module.lambda_function.id
-  }
-}
+# Lattice Service Modules
+module "lattice_service1" {
+  source = "./modules/lattice-service"
 
-resource "aws_vpclattice_target_group_attachment" "service3_attach" {
-  target_group_identifier = aws_vpclattice_target_group.service3_tg.id
-  target {
-    id   = module.ec2_lb.id
-    port = 80
-  }
-}
+  name      = "service1"
+  auth_type = "AWS_IAM"
 
-# Create Lattice Services
-resource "aws_vpclattice_service" "service1" {
-  name            = "service1"
-  auth_type       = "AWS_IAM"
-  certificate_arn = null
-}
-
-resource "aws_vpclattice_listener" "service1_listener" {
-  service_identifier = aws_vpclattice_service.service1.id
-  name               = "http-listener"
-  port               = 80
-  protocol           = "HTTP"
-
-  default_action {
-    forward {
-      target_groups {
-        target_group_identifier = aws_vpclattice_target_group.service1_tg.id
-        weight                  = 100
+  listeners = {
+    http = {
+      name     = "http-listener"
+      port     = 80
+      protocol = "HTTP"
+      forward = {
+        target_groups = [
+          {
+            target_group_identifier = module.service1_target_group.target_group_id
+            weight                  = 100
+          }
+        ]
       }
     }
   }
-}
 
-resource "aws_vpclattice_service" "service2" {
-  name            = "service2"
-  auth_type       = "AWS_IAM"
-  certificate_arn = null
-}
-
-resource "aws_vpclattice_listener" "service2_listener" {
-  service_identifier = aws_vpclattice_service.service2.id
-  name               = "http-listener"
-  port               = 80
-  protocol           = "HTTP"
-
-  default_action {
-    forward {
-      target_groups {
-        target_group_identifier = aws_vpclattice_target_group.service2_tg.id
-        weight                  = 100
-      }
+  service_network_associations = {
+    main = {
+      service_network_id = module.lattice_service_network.service_network_id
     }
+  }
+
+  tags = {
+    Service     = "service1"
+    Environment = "production"
   }
 }
 
-resource "aws_vpclattice_service" "service3" {
-  name            = "service3"
-  auth_type       = "AWS_IAM"
-  certificate_arn = null
-}
+module "lattice_service2" {
+  source = "./modules/lattice-service"
 
-resource "aws_vpclattice_listener" "service3_listener" {
-  service_identifier = aws_vpclattice_service.service3.id
-  name               = "http-listener"
-  port               = 80
-  protocol           = "HTTP"
+  name      = "service2"
+  auth_type = "AWS_IAM"
 
-  default_action {
-    forward {
-      target_groups {
-        target_group_identifier = aws_vpclattice_target_group.service3_tg.id
-        weight                  = 100
+  listeners = {
+    http = {
+      name     = "http-listener"
+      port     = 80
+      protocol = "HTTP"
+      forward = {
+        target_groups = [
+          {
+            target_group_identifier = module.service2_target_group.target_group_id
+            weight                  = 100
+          }
+        ]
       }
     }
   }
+
+  service_network_associations = {
+    main = {
+      service_network_id = module.lattice_service_network.service_network_id
+    }
+  }
+
+  tags = {
+    Service     = "service2"
+    Environment = "production"
+  }
 }
 
-# Associate services to the service network
-resource "aws_vpclattice_service_network_service_association" "service1_assoc" {
-  service_identifier         = aws_vpclattice_service.service1.id
-  service_network_identifier = aws_vpclattice_service_network.lattice_network.id
-}
+module "lattice_service3" {
+  source = "./modules/lattice-service"
 
-resource "aws_vpclattice_service_network_service_association" "service2_assoc" {
-  service_identifier         = aws_vpclattice_service.service2.id
-  service_network_identifier = aws_vpclattice_service_network.lattice_network.id
-}
+  name      = "service3"
+  auth_type = "AWS_IAM"
 
-resource "aws_vpclattice_service_network_service_association" "service3_assoc" {
-  service_identifier         = aws_vpclattice_service.service3.id
-  service_network_identifier = aws_vpclattice_service_network.lattice_network.id
+  listeners = {
+    http = {
+      name     = "http-listener"
+      port     = 80
+      protocol = "HTTP"
+      forward = {
+        target_groups = [
+          {
+            target_group_identifier = module.service3_target_group.target_group_id
+            weight                  = 100
+          }
+        ]
+      }
+    }
+  }
+
+  service_network_associations = {
+    main = {
+      service_network_id = module.lattice_service_network.service_network_id
+    }
+  }
+
+  tags = {
+    Service     = "service3"
+    Environment = "production"
+  }
 }
