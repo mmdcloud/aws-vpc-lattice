@@ -2,6 +2,8 @@ resource "random_id" "id" {
   byte_length = 8
 }
 
+data "aws_elb_service_account" "main" {}
+
 # -----------------------------------------------------------------------------------------
 # VPC Configuration
 # -----------------------------------------------------------------------------------------
@@ -16,9 +18,9 @@ module "vpc1" {
   enable_dns_support      = true
   create_igw              = true
   map_public_ip_on_launch = true
-  enable_nat_gateway      = true
+  enable_nat_gateway      = false
   single_nat_gateway      = false
-  one_nat_gateway_per_az  = true
+  one_nat_gateway_per_az  = false
   tags = {
     Name = "vpc1"
   }
@@ -35,9 +37,9 @@ module "vpc2" {
   enable_dns_support      = true
   create_igw              = true
   map_public_ip_on_launch = true
-  enable_nat_gateway      = true
+  enable_nat_gateway      = false
   single_nat_gateway      = false
-  one_nat_gateway_per_az  = true
+  one_nat_gateway_per_az  = false
   tags = {
     Name = "vpc2"
   }
@@ -54,9 +56,9 @@ module "vpc3" {
   enable_dns_support      = true
   create_igw              = true
   map_public_ip_on_launch = true
-  enable_nat_gateway      = true
+  enable_nat_gateway      = false
   single_nat_gateway      = false
-  one_nat_gateway_per_az  = true
+  one_nat_gateway_per_az  = false
   tags = {
     Name = "vpc3"
   }
@@ -244,7 +246,7 @@ module "container_registry" {
   scan_on_push         = false
   image_tag_mutability = "IMMUTABLE"
   bash_command         = "bash ${path.cwd}/../src/ecr-build-push.sh nodeapp ${var.region}"
-  name                 = "nodeapp-registry"
+  name                 = "nodeapp"
   lifecycle_policy = jsonencode({
     rules = [
       {
@@ -315,10 +317,41 @@ module "ecs_task_execution_role" {
 }
 
 module "ecs_lb_logs_bucket" {
-  source        = "./modules/s3"
-  bucket_name   = "ecs-lb-logs-bucket"
-  objects       = []
-  bucket_policy = ""
+  source      = "./modules/s3"
+  bucket_name = "ecs-lb-logs-bucket-${var.region}"
+  objects     = []
+  bucket_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AWSLogDeliveryWrite"
+        Effect = "Allow"
+        Principal = {
+          Service = "logging.s3.amazonaws.com"
+        }
+        Action   = "s3:PutObject"
+        Resource = "arn:aws:s3:::ecs-lb-logs-bucket-${var.region}/*"
+      },
+      {
+        Sid    = "AWSLogDeliveryAclCheck"
+        Effect = "Allow"
+        Principal = {
+          Service = "logging.s3.amazonaws.com"
+        }
+        Action   = "s3:GetBucketAcl"
+        Resource = "arn:aws:s3:::ecs-lb-logs-bucket-${var.region}"
+      },
+      {
+        Sid    = "AWSELBAccountWrite"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_elb_service_account.main.id}:root"
+        }
+        Action   = "s3:PutObject"
+        Resource = "arn:aws:s3:::ecs-lb-logs-bucket-${var.region}/*"
+      }
+    ]
+  })
   cors = [
     {
       allowed_headers = ["*"]
@@ -459,7 +492,7 @@ module "ecs_cluster" {
           container_port   = 8080
         }
       }
-      subnet_ids                    = module.vpc1.private_subnets
+      subnet_ids                    = module.vpc1.public_subnets
       vpc_id                        = module.vpc1.vpc_id
       security_group_ids            = [module.ecs_sg.id]
       availability_zone_rebalancing = "ENABLED"
@@ -547,7 +580,7 @@ module "lambda_function" {
   permissions   = []
   vpc_config = {
     security_group_ids = [module.lambda_sg.id]
-    subnet_ids         = module.vpc2.private_subnets
+    subnet_ids         = module.vpc2.public_subnets
   }
   env_variables           = {}
   handler                 = "lambda.lambda_handler"
@@ -565,10 +598,41 @@ module "lambda_function" {
 # EC2 Configuration
 # -----------------------------------------------------------------------------------------
 module "ec2_lb_logs_bucket" {
-  source        = "./modules/s3"
-  bucket_name   = "ec2-lb-logs-bucket"
-  objects       = []
-  bucket_policy = ""
+  source      = "./modules/s3"
+  bucket_name = "ec2-lb-logs-bucket-${var.region}"
+  objects     = []
+  bucket_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AWSLogDeliveryWrite"
+        Effect = "Allow"
+        Principal = {
+          Service = "logging.s3.amazonaws.com"
+        }
+        Action   = "s3:PutObject"
+        Resource = "arn:aws:s3:::ec2-lb-logs-bucket-${var.region}/*"
+      },
+      {
+        Sid    = "AWSLogDeliveryAclCheck"
+        Effect = "Allow"
+        Principal = {
+          Service = "logging.s3.amazonaws.com"
+        }
+        Action   = "s3:GetBucketAcl"
+        Resource = "arn:aws:s3:::ec2-lb-logs-bucket-${var.region}"
+      },
+      {
+        Sid    = "AWSELBAccountWrite"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_elb_service_account.main.id}:root"
+        }
+        Action   = "s3:PutObject"
+        Resource = "arn:aws:s3:::ec2-lb-logs-bucket-${var.region}/*"
+      }
+    ]
+  })
   cors = [
     {
       allowed_headers = ["*"]
@@ -623,7 +687,7 @@ module "ec2_lb" {
     ec2_target_group = {
       backend_protocol = "HTTP"
       backend_port     = 8080
-      target_type      = "ip"
+      target_type      = "instance"
       vpc_id           = module.vpc3.vpc_id
       health_check = {
         enabled             = true
@@ -710,7 +774,7 @@ module "asg" {
   health_check_type         = "ELB"
   force_delete              = true
   target_group_arns         = [module.ec2_lb.target_groups["ec2_target_group"].arn]
-  vpc_zone_identifier       = module.vpc3.private_subnets
+  vpc_zone_identifier       = module.vpc3.public_subnets
   launch_template_id        = module.launch_template.id
   launch_template_version   = "$Latest"
 }
@@ -880,7 +944,7 @@ module "asg" {
 
 # Service Network Module
 module "lattice_service_network" {
-  source = "./modules/service-network"
+  source = "./modules/lattice/service-network"
 
   name      = "lattice-network"
   auth_type = "AWS_IAM"
@@ -888,15 +952,15 @@ module "lattice_service_network" {
   vpc_associations = {
     vpc1 = {
       vpc_id             = module.vpc1.vpc_id
-      security_group_ids = [module.lattice_sg.id]
+      security_group_ids = [module.ecs_lb_sg.id]
     }
     vpc2 = {
       vpc_id             = module.vpc2.vpc_id
-      security_group_ids = [module.lattice_sg.id]
+      security_group_ids = [module.lambda_sg.id]
     }
     vpc3 = {
       vpc_id             = module.vpc3.vpc_id
-      security_group_ids = [module.lattice_sg.id]
+      security_group_ids = [module.ec2_lb_sg.id]
     }
   }
 
@@ -908,7 +972,7 @@ module "lattice_service_network" {
 
 # Target Group Modules
 module "service1_target_group" {
-  source = "./modules/target-group"
+  source = "./modules/lattice/target-group"
 
   name = "service1-target-group"
   type = "ALB"
@@ -921,7 +985,7 @@ module "service1_target_group" {
 
   targets = {
     ecs_lb = {
-      id   = module.ecs_lb.id
+      id   = module.ecs_lb.arn
       port = 80
     }
   }
@@ -933,14 +997,14 @@ module "service1_target_group" {
 }
 
 module "service2_target_group" {
-  source = "./modules/target-group"
+  source = "./modules/lattice/target-group"
 
   name = "service2-target-group"
   type = "LAMBDA"
 
   targets = {
     lambda_function = {
-      id = module.lambda_function.id
+      id = module.lambda_function.arn
     }
   }
 
@@ -951,7 +1015,7 @@ module "service2_target_group" {
 }
 
 module "service3_target_group" {
-  source = "./modules/target-group"
+  source = "./modules/lattice/target-group"
 
   name = "service3-target-group"
   type = "ALB"
@@ -964,7 +1028,7 @@ module "service3_target_group" {
 
   targets = {
     ec2_lb = {
-      id   = module.ec2_lb.id
+      id   = module.ec2_lb.arn
       port = 80
     }
   }
@@ -977,7 +1041,7 @@ module "service3_target_group" {
 
 # Lattice Service Modules
 module "lattice_service1" {
-  source = "./modules/lattice-service"
+  source = "./modules/lattice/lattice"
 
   name      = "service1"
   auth_type = "AWS_IAM"
@@ -1011,7 +1075,7 @@ module "lattice_service1" {
 }
 
 module "lattice_service2" {
-  source = "./modules/lattice-service"
+  source = "./modules/lattice/lattice"
 
   name      = "service2"
   auth_type = "AWS_IAM"
@@ -1045,7 +1109,7 @@ module "lattice_service2" {
 }
 
 module "lattice_service3" {
-  source = "./modules/lattice-service"
+  source = "./modules/lattice/lattice"
 
   name      = "service3"
   auth_type = "AWS_IAM"
