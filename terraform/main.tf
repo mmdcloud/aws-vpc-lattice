@@ -382,11 +382,11 @@ module "ecs_lb" {
   name                       = "ecs-lb"
   load_balancer_type         = "application"
   vpc_id                     = module.vpc1.vpc_id
-  subnets                    = module.vpc1.public_subnets
+  subnets                    = module.vpc1.private_subnets
   enable_deletion_protection = false
   drop_invalid_header_fields = true
   ip_address_type            = "ipv4"
-  internal                   = false
+  internal                   = true
   security_groups = [
     module.ecs_lb_sg.id
   ]
@@ -663,11 +663,11 @@ module "ec2_lb" {
   name                       = "ec2-lb"
   load_balancer_type         = "application"
   vpc_id                     = module.vpc3.vpc_id
-  subnets                    = module.vpc3.public_subnets
+  subnets                    = module.vpc3.private_subnets
   enable_deletion_protection = false
   drop_invalid_header_fields = true
   ip_address_type            = "ipv4"
-  internal                   = false
+  internal                   = true
   security_groups = [
     module.ec2_lb_sg.id
   ]
