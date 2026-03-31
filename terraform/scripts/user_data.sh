@@ -14,7 +14,7 @@ cd /home/ubuntu
 mkdir nodeapp
 # Checking out from Version Control
 git clone https://github.com/mmdcloud/aws-vpc-lattice
-cd aws-vpc-lattice/src
+cd aws-vpc-lattice/src/asg
 cp -r . /home/ubuntu/nodeapp/
 cd /home/ubuntu/nodeapp/
 
@@ -24,7 +24,7 @@ cp scripts/default /etc/nginx/sites-available/
 sudo npm i
 
 # Starting PM2 app
-pm2 start server.mjs
+pm2 start app.js
 sudo service nginx restart
 
 # Installing AWS CloudWatch Agent
