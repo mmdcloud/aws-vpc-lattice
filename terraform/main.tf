@@ -518,11 +518,11 @@ module "ecs_cluster" {
           environment            = []
           readonlyRootFilesystem = false
           logConfiguration = {
-              logDriver = "awslogs"
-              options = {
-                awslogs-group         = module.nodeapp_ecs_log_group.name
-                awslogs-region        = var.region
-                awslogs-stream-prefix = "nodeapp-ecs"
+            logDriver = "awslogs"
+            options = {
+              awslogs-group         = module.nodeapp_ecs_log_group.name
+              awslogs-region        = var.region
+              awslogs-stream-prefix = "nodeapp-ecs"
             }
           }
           memoryReservation = 100
@@ -624,8 +624,7 @@ module "lambda_function_iam_role" {
 module "lambda_function" {
   source        = "./modules/lambda"
   function_name = "lambda-function"
-  role_arn      = module.lambda_function_iam_role.arn
-  permissions   = []
+  role_arn      = module.lambda_function_iam_role.arn  
   vpc_config = {
     security_group_ids = [module.lambda_sg.id]
     subnet_ids         = module.vpc2.private_subnets
@@ -640,6 +639,14 @@ module "lambda_function" {
   tags = {
     Name = "lambda-function"
   }
+}
+
+resource "aws_lambda_permission" "allow_lattice" {
+  statement_id  = "AllowVPCLatticeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = module.lambda_function.arn
+  principal     = "vpc-lattice.amazonaws.com"
+  source_arn    = module.service2_target_group.target_group_arn
 }
 
 # -----------------------------------------------------------------------------------------
@@ -701,7 +708,7 @@ module "ec2_lb_logs_bucket" {
 
 module "nodeapp_ec2_log_group" {
   source            = "./modules/cloudwatch/cloudwatch-log-group"
-  log_group_name    = "/aws/ecs/nodeapp-ec2-log-group"
+  log_group_name    = "/aws/ec2/nodeapp-ec2-log-group"
   skip_destroy      = false
   retention_in_days = 90
 }
@@ -830,9 +837,9 @@ module "launch_template" {
 module "asg" {
   source                    = "./modules/auto_scaling_group"
   name                      = "asg"
-  min_size                  = 3
-  max_size                  = 50
-  desired_capacity          = 3
+  min_size                  = 1
+  max_size                  = 2
+  desired_capacity          = 1
   health_check_grace_period = 300
   health_check_type         = "ELB"
   force_delete              = true
