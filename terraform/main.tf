@@ -75,7 +75,7 @@ module "lattice_sg_vpc1" {
       to_port         = 80
       protocol        = "tcp"
       security_groups = []
-      cidr_blocks     = ["169.254.171.0/23"]
+      cidr_blocks     = ["169.254.170.0/23"]
     }
   ]
   egress_rules = [
@@ -102,7 +102,7 @@ module "lattice_sg_vpc2" {
       to_port         = 80
       protocol        = "tcp"
       security_groups = []
-      cidr_blocks     = ["169.254.171.0/23"]
+      cidr_blocks     = ["169.254.170.0/23"]
     }
   ]
   egress_rules = [
@@ -129,7 +129,7 @@ module "lattice_sg_vpc3" {
       to_port         = 80
       protocol        = "tcp"
       security_groups = []
-      cidr_blocks     = ["169.254.171.0/23"]
+      cidr_blocks     = ["169.254.170.0/23"]
     }
   ]
   egress_rules = [
@@ -624,7 +624,7 @@ module "lambda_function_iam_role" {
 module "lambda_function" {
   source        = "./modules/lambda"
   function_name = "lambda-function"
-  role_arn      = module.lambda_function_iam_role.arn  
+  role_arn      = module.lambda_function_iam_role.arn
   vpc_config = {
     security_group_ids = [module.lambda_sg.id]
     subnet_ids         = module.vpc2.private_subnets
