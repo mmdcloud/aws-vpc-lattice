@@ -18,9 +18,9 @@ module "vpc1" {
   enable_dns_support      = true
   create_igw              = true
   map_public_ip_on_launch = true
-  enable_nat_gateway      = false
+  enable_nat_gateway      = true
   single_nat_gateway      = false
-  one_nat_gateway_per_az  = false
+  one_nat_gateway_per_az  = true
   tags = {
     Name = "vpc1"
   }
@@ -37,9 +37,9 @@ module "vpc2" {
   enable_dns_support      = true
   create_igw              = true
   map_public_ip_on_launch = true
-  enable_nat_gateway      = false
+  enable_nat_gateway      = true
   single_nat_gateway      = false
-  one_nat_gateway_per_az  = false
+  one_nat_gateway_per_az  = true
   tags = {
     Name = "vpc2"
   }
@@ -56,39 +56,31 @@ module "vpc3" {
   enable_dns_support      = true
   create_igw              = true
   map_public_ip_on_launch = true
-  enable_nat_gateway      = false
+  enable_nat_gateway      = true
   single_nat_gateway      = false
-  one_nat_gateway_per_az  = false
+  one_nat_gateway_per_az  = true
   tags = {
     Name = "vpc3"
   }
 }
 
-module "lattice_sg" {
+module "lattice_sg_vpc1" {
   source = "./modules/security-groups"
-  name   = "lattice-sg"
+  name   = "lattice-sg-vpc1"
   vpc_id = module.vpc1.vpc_id
   ingress_rules = [
     {
-      description     = "HTTP Traffic"
+      description     = "VPC Lattice link-local"
       from_port       = 80
       to_port         = 80
       protocol        = "tcp"
       security_groups = []
-      cidr_blocks     = ["0.0.0.0/0"]
-    },
-    {
-      description     = "All Traffic"
-      from_port       = 0
-      to_port         = 0
-      protocol        = "tcp"
-      security_groups = []
-      cidr_blocks     = ["0.0.0.0/0"]
+      cidr_blocks     = ["169.254.171.0/23"]
     }
   ]
   egress_rules = [
     {
-      description     = "Allow outbound traffic to al"
+      description     = "Allow all outbound"
       from_port       = 0
       to_port         = 0
       protocol        = "-1"
@@ -96,9 +88,61 @@ module "lattice_sg" {
       security_groups = []
     }
   ]
-  tags = {
-    Name = "lattice-sg"
-  }
+  tags = { Name = "lattice-sg-vpc1" }
+}
+
+module "lattice_sg_vpc2" {
+  source = "./modules/security-groups"
+  name   = "lattice-sg-vpc2"
+  vpc_id = module.vpc2.vpc_id
+  ingress_rules = [
+    {
+      description     = "VPC Lattice link-local"
+      from_port       = 80
+      to_port         = 80
+      protocol        = "tcp"
+      security_groups = []
+      cidr_blocks     = ["169.254.171.0/23"]
+    }
+  ]
+  egress_rules = [
+    {
+      description     = "Allow all outbound"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+    }
+  ]
+  tags = { Name = "lattice-sg-vpc2" }
+}
+
+module "lattice_sg_vpc3" {
+  source = "./modules/security-groups"
+  name   = "lattice-sg-vpc3"
+  vpc_id = module.vpc3.vpc_id
+  ingress_rules = [
+    {
+      description     = "VPC Lattice link-local"
+      from_port       = 80
+      to_port         = 80
+      protocol        = "tcp"
+      security_groups = []
+      cidr_blocks     = ["169.254.171.0/23"]
+    }
+  ]
+  egress_rules = [
+    {
+      description     = "Allow all outbound"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+    }
+  ]
+  tags = { Name = "lattice-sg-vpc3" }
 }
 
 module "ecs_lb_sg" {
@@ -306,7 +350,13 @@ module "ecs_task_execution_role" {
         "Statement": [
             {
                 "Action": [
-                  "s3:PutObject"
+                  "s3:PutObject",
+                  "ecr:GetAuthorizationToken",
+                  "ecr:BatchCheckLayerAvailability",
+                  "ecr:GetDownloadUrlForLayer",
+                  "ecr:BatchGetImage",
+                  "logs:CreateLogStream",
+                  "logs:PutLogEvents"
                 ],
                 "Resource": "*",
                 "Effect": "Allow"
@@ -468,13 +518,11 @@ module "ecs_cluster" {
           environment            = []
           readonlyRootFilesystem = false
           logConfiguration = {
-            logConfiguration = {
               logDriver = "awslogs"
               options = {
                 awslogs-group         = module.nodeapp_ecs_log_group.name
                 awslogs-region        = var.region
                 awslogs-stream-prefix = "nodeapp-ecs"
-              }
             }
           }
           memoryReservation = 100
@@ -492,7 +540,7 @@ module "ecs_cluster" {
           container_port   = 8080
         }
       }
-      subnet_ids                    = module.vpc1.public_subnets
+      subnet_ids                    = module.vpc1.private_subnets
       vpc_id                        = module.vpc1.vpc_id
       security_group_ids            = [module.ecs_sg.id]
       availability_zone_rebalancing = "ENABLED"
@@ -580,7 +628,7 @@ module "lambda_function" {
   permissions   = []
   vpc_config = {
     security_group_ids = [module.lambda_sg.id]
-    subnet_ids         = module.vpc2.public_subnets
+    subnet_ids         = module.vpc2.private_subnets
   }
   env_variables           = {}
   handler                 = "lambda.lambda_handler"
@@ -745,19 +793,34 @@ resource "aws_iam_instance_profile" "iam_instance_profile" {
   role = module.iam_instance_profile_role.name
 }
 
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"]
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
 module "launch_template" {
   source                               = "./modules/launch_template"
   name                                 = "launch-template"
   description                          = "launch-template"
   ebs_optimized                        = false
-  image_id                             = "ami-005fc0f236362e99f"
+  image_id                             = data.aws_ami.ubuntu.id
   instance_type                        = "t2.micro"
   instance_initiated_shutdown_behavior = "stop"
   instance_profile_name                = aws_iam_instance_profile.iam_instance_profile.name
   key_name                             = "madmaxkeypair"
   network_interfaces = [
     {
-      associate_public_ip_address = true
+      associate_public_ip_address = false
       security_groups             = [module.ec2_asg_sg.id]
     }
   ]
@@ -774,7 +837,7 @@ module "asg" {
   health_check_type         = "ELB"
   force_delete              = true
   target_group_arns         = [module.ec2_lb.target_groups["ec2_target_group"].arn]
-  vpc_zone_identifier       = module.vpc3.public_subnets
+  vpc_zone_identifier       = module.vpc3.private_subnets
   launch_template_id        = module.launch_template.id
   launch_template_version   = "$Latest"
 }
@@ -952,15 +1015,15 @@ module "lattice_service_network" {
   vpc_associations = {
     vpc1 = {
       vpc_id             = module.vpc1.vpc_id
-      security_group_ids = [module.ecs_lb_sg.id]
+      security_group_ids = [module.lattice_sg_vpc1.id]
     }
     vpc2 = {
       vpc_id             = module.vpc2.vpc_id
-      security_group_ids = [module.lambda_sg.id]
+      security_group_ids = [module.lattice_sg_vpc2.id]
     }
     vpc3 = {
       vpc_id             = module.vpc3.vpc_id
-      security_group_ids = [module.ec2_lb_sg.id]
+      security_group_ids = [module.lattice_sg_vpc3.id]
     }
   }
 
