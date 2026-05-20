@@ -22,3 +22,7 @@ output "service_network_association_ids" {
   description = "Map of service network association IDs"
   value       = { for k, v in aws_vpclattice_service_network_service_association.this : k => v.id }
 }
+
+output "service_dns_name" {
+  value = aws_vpclattice_service.this.dns_entry[0].domain_name
+}

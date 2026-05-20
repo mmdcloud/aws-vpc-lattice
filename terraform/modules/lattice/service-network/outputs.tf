@@ -12,3 +12,7 @@ output "vpc_association_ids" {
   description = "Map of VPC association IDs"
   value       = { for k, v in aws_vpclattice_service_network_vpc_association.this : k => v.id }
 }
+
+output "service_network_arn" {
+  value = aws_vpclattice_service_network.this.arn
+}

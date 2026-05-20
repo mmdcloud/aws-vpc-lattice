@@ -64,6 +64,28 @@ module "vpc3" {
   }
 }
 
+module "vpc4" {
+  source                  = "./modules/vpc"
+  vpc_name                = "vpc4"
+  vpc_cidr                = "10.4.0.0/16"
+  azs                     = var.azs
+  public_subnets          = var.vpc4_public_subnets
+  private_subnets         = var.vpc4_private_subnets
+  enable_dns_hostnames    = true
+  enable_dns_support      = true
+  create_igw              = true
+  map_public_ip_on_launch = true
+  enable_nat_gateway      = true
+  single_nat_gateway      = false
+  one_nat_gateway_per_az  = true
+  tags = {
+    Name = "vpc4"
+    # EKS requires these tags on the VPC and subnets to discover them
+    "kubernetes.io/cluster/eks-cluster" = "shared"
+  }
+}
+
+
 module "lattice_sg_vpc1" {
   source = "./modules/security-groups"
   name   = "lattice-sg-vpc1"
@@ -143,6 +165,41 @@ module "lattice_sg_vpc3" {
     }
   ]
   tags = { Name = "lattice-sg-vpc3" }
+}
+
+module "lattice_sg_vpc4" {
+  source = "./modules/security-groups"
+  name   = "lattice-sg-vpc4"
+  vpc_id = module.vpc4.vpc_id
+  ingress_rules = [
+    {
+      description     = "VPC Lattice link-local HTTPS"
+      from_port       = 443
+      to_port         = 443
+      protocol        = "tcp"
+      security_groups = []
+      cidr_blocks     = ["169.254.170.0/23"]
+    },
+    {
+      description     = "VPC Lattice link-local HTTP"
+      from_port       = 80
+      to_port         = 80
+      protocol        = "tcp"
+      security_groups = []
+      cidr_blocks     = ["169.254.170.0/23"]
+    }
+  ]
+  egress_rules = [
+    {
+      description     = "Allow all outbound"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+    }
+  ]
+  tags = { Name = "lattice-sg-vpc4" }
 }
 
 module "ecs_lb_sg" {
@@ -1210,4 +1267,254 @@ module "lattice_service3" {
     Service     = "service3"
     Environment = "production"
   }
+}
+
+# -----------------------------------------------------------------------------------------
+# EKS node SG — nodes need to reach Lattice link-local range
+# -----------------------------------------------------------------------------------------
+module "eks_node_sg" {
+  source = "./modules/security-groups"
+  name   = "eks-node-sg"
+  vpc_id = module.vpc4.vpc_id
+  ingress_rules = [
+    {
+      # nodes talking to each other (required by EKS)
+      description     = "Node to node all traffic"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      security_groups = []
+      cidr_blocks     = ["10.4.0.0/16"]
+    }
+  ]
+  egress_rules = [
+    {
+      description     = "Allow all outbound — includes Lattice 169.254.170.0/23"
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+    }
+  ]
+  tags = { Name = "eks-node-sg" }
+}
+
+# -----------------------------------------------------------------------------------------
+# Associate vpc4 to the existing Lattice service network
+# -----------------------------------------------------------------------------------------
+resource "aws_vpclattice_service_network_vpc_association" "vpc4_assoc" {
+  service_network_identifier = module.lattice_service_network.service_network_id
+  vpc_identifier             = module.vpc4.vpc_id
+  security_group_ids         = [module.lattice_sg_vpc4.id]
+}
+
+# -----------------------------------------------------------------------------------------
+# IAM — EKS cluster role
+# -----------------------------------------------------------------------------------------
+resource "aws_iam_role" "eks_cluster_role" {
+  name = "eks-cluster-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "eks.amazonaws.com" }
+    }]
+  })
+
+  tags = { Name = "eks-cluster-role" }
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
+  role       = aws_iam_role.eks_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "eks_vpc_resource_controller" {
+  role       = aws_iam_role.eks_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
+}
+
+# -----------------------------------------------------------------------------------------
+# IAM — EKS node group role
+# -----------------------------------------------------------------------------------------
+resource "aws_iam_role" "eks_node_role" {
+  name = "eks-node-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+
+  tags = { Name = "eks-node-role" }
+}
+
+resource "aws_iam_role_policy_attachment" "eks_worker_node_policy" {
+  role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
+  role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
+
+resource "aws_iam_role_policy_attachment" "eks_ecr_readonly" {
+  role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_iam_role_policy_attachment" "eks_ssm" {
+  role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# Inline policy: allow pods on nodes to call Lattice services via SigV4
+resource "aws_iam_role_policy" "eks_node_lattice" {
+  name = "eks-node-lattice-invoke"
+  role = aws_iam_role.eks_node_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowLatticeServiceInvoke"
+        Effect = "Allow"
+        Action = [
+          "vpc-lattice-svcs:Invoke"
+        ]
+        # Scope to exactly your three Lattice services
+        Resource = [
+          module.lattice_service1.service_arn,
+          module.lattice_service2.service_arn,
+          module.lattice_service3.service_arn,
+        ]
+      }
+    ]
+  })
+}
+
+# -----------------------------------------------------------------------------------------
+# EKS Cluster
+# -----------------------------------------------------------------------------------------
+resource "aws_eks_cluster" "eks" {
+  name     = "eks-cluster"
+  version  = var.eks_cluster_version
+  role_arn = aws_iam_role.eks_cluster_role.arn
+
+  vpc_config {
+    subnet_ids              = concat(module.vpc4.private_subnets, module.vpc4.public_subnets)
+    security_group_ids      = [module.eks_node_sg.id]
+    endpoint_private_access = true
+    endpoint_public_access  = true  # set false once you have a bastion/VPN
+  }
+
+  # Ship control plane logs to CloudWatch
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
+  access_config {
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_cluster_policy,
+    aws_iam_role_policy_attachment.eks_vpc_resource_controller,
+  ]
+
+  tags = { Name = "eks-cluster" }
+}
+
+resource "aws_cloudwatch_log_group" "eks_cluster" {
+  name              = "/aws/eks/eks-cluster/cluster"
+  retention_in_days = 90
+}
+
+# -----------------------------------------------------------------------------------------
+# EKS Managed Node Group
+# -----------------------------------------------------------------------------------------
+resource "aws_eks_node_group" "eks_nodes" {
+  cluster_name    = aws_eks_cluster.eks.name
+  node_group_name = "eks-node-group"
+  node_role_arn   = aws_iam_role.eks_node_role.arn
+
+  # Nodes go into private subnets only
+  subnet_ids = module.vpc4.private_subnets
+
+  instance_types = ["t3.medium"]
+  capacity_type  = "ON_DEMAND"
+
+  scaling_config {
+    desired_size = 2
+    min_size     = 2
+    max_size     = 5
+  }
+
+  update_config {
+    max_unavailable = 1
+  }
+
+  # Label nodes so workloads can select them
+  labels = {
+    role = "lattice-client"
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_worker_node_policy,
+    aws_iam_role_policy_attachment.eks_cni_policy,
+    aws_iam_role_policy_attachment.eks_ecr_readonly,
+  ]
+
+  tags = { Name = "eks-node-group" }
+}
+
+# -----------------------------------------------------------------------------------------
+# EKS add-ons
+# -----------------------------------------------------------------------------------------
+resource "aws_eks_addon" "coredns" {
+  cluster_name                = aws_eks_cluster.eks.name
+  addon_name                  = "coredns"
+  resolve_conflicts_on_update = "OVERWRITE"
+  depends_on                  = [aws_eks_node_group.eks_nodes]
+}
+
+resource "aws_eks_addon" "kube_proxy" {
+  cluster_name                = aws_eks_cluster.eks.name
+  addon_name                  = "kube-proxy"
+  resolve_conflicts_on_update = "OVERWRITE"
+}
+
+resource "aws_eks_addon" "vpc_cni" {
+  cluster_name                = aws_eks_cluster.eks.name
+  addon_name                  = "vpc-cni"
+  resolve_conflicts_on_update = "OVERWRITE"
+}
+
+# -----------------------------------------------------------------------------------------
+# Lattice auth policy — allow EKS node role to invoke all three services
+# Applied at service network level so it covers all associated services
+# -----------------------------------------------------------------------------------------
+resource "aws_vpclattice_auth_policy" "eks_to_services" {
+  resource_identifier = module.lattice_service_network.service_network_arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowEKSNodes"
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.eks_node_role.arn
+        }
+        Action   = "vpc-lattice-svcs:Invoke"
+        Resource = "*"
+      }
+    ]
+  })
 }
