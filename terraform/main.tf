@@ -1289,7 +1289,7 @@ module "eks_node_sg" {
   ]
   egress_rules = [
     {
-      description     = "Allow all outbound — includes Lattice 169.254.170.0/23"
+      description     = "Allow all outbound includes Lattice 169.254.170.0/23"
       from_port       = 0
       to_port         = 0
       protocol        = "-1"
@@ -1412,7 +1412,7 @@ resource "aws_eks_cluster" "eks" {
     subnet_ids              = concat(module.vpc4.private_subnets, module.vpc4.public_subnets)
     security_group_ids      = [module.eks_node_sg.id]
     endpoint_private_access = true
-    endpoint_public_access  = true  # set false once you have a bastion/VPN
+    endpoint_public_access  = true # set false once you have a bastion/VPN
   }
 
   # Ship control plane logs to CloudWatch
